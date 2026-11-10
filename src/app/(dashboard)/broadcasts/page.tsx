@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Radio, Plus, Loader2 } from 'lucide-react';
+import { Radio, Plus, Loader2, RotateCcw } from 'lucide-react';
 import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
 import { getBroadcastStatus } from '@/lib/broadcast-status';
@@ -65,9 +65,10 @@ export default function BroadcastsPage() {
   const canCreate = useCan('send-messages');
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Used to kick off polling only while something is actively sending.
+  // Used to kick off polling while something is sending or awaiting status updates.
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function fetchBroadcasts() {
@@ -96,6 +97,18 @@ export default function BroadcastsPage() {
     [broadcasts],
   );
 
+  const anyActive = useMemo(
+    () =>
+      broadcasts.some((b) => {
+        if (b.status === 'sending') return true;
+        // Keep polling if the broadcast was sent recently (last 2 hours) and still has unread recipients
+        const isRecent =
+          Date.now() - new Date(b.created_at).getTime() < 2 * 60 * 60 * 1000;
+        return isRecent && b.read_count < (b.sent_count || b.total_recipients);
+      }),
+    [broadcasts],
+  );
+
   useEffect(() => {
     function startPolling() {
       if (pollTimer.current) return;
@@ -111,7 +124,7 @@ export default function BroadcastsPage() {
     // the user is away, and ensures a fresh fetch the moment they
     // refocus so they don't see stale data on return.
     function handleVisibilityChange() {
-      if (!anySending) return;
+      if (!anyActive) return;
       if (document.visibilityState === 'hidden') {
         stopPolling();
       } else {
@@ -120,7 +133,7 @@ export default function BroadcastsPage() {
       }
     }
 
-    if (anySending && document.visibilityState === 'visible') {
+    if (anyActive && document.visibilityState === 'visible') {
       startPolling();
     } else {
       stopPolling();
@@ -130,7 +143,7 @@ export default function BroadcastsPage() {
       stopPolling();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [anySending]);
+  }, [anyActive]);
 
   if (loading) {
     return (
@@ -188,15 +201,35 @@ export default function BroadcastsPage() {
             {t('subtitle')}
           </p>
         </div>
-        <GatedButton
-          canAct={canCreate}
-          gateReason={tGate('reasons.createBroadcasts')}
-          onClick={() => router.push('/broadcasts/new')}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
-        >
-          <Plus className="h-4 w-4" />
-          {t('newBroadcast')}
-        </GatedButton>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              setRefreshing(true);
+              try {
+                await fetchBroadcasts();
+              } finally {
+                setRefreshing(false);
+              }
+            }}
+            disabled={refreshing}
+            className="border-border text-muted-foreground hover:bg-muted"
+            title="Refresh broadcasts list"
+          >
+            <RotateCcw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+          <GatedButton
+            canAct={canCreate}
+            gateReason={tGate('reasons.createBroadcasts')}
+            onClick={() => router.push('/broadcasts/new')}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" />
+            {t('newBroadcast')}
+          </GatedButton>
+        </div>
       </div>
 
       {broadcasts.length === 0 ? (

@@ -80,6 +80,7 @@ export function WhatsAppConfig() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [registering, setRegistering] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [config, setConfig] = useState<WhatsAppConfigType | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('unknown');
@@ -126,8 +127,9 @@ export function WhatsAppConfig() {
   const [verifyingRegistration, setVerifyingRegistration] = useState(false);
   type RegistrationProbe = {
     live: boolean;
-    checks: Record<string, boolean | null>;
+    checks: Record<string, boolean | string | null>;
     errors?: string[];
+    phone_info?: Record<string, unknown> | null;
     last_registration_error?: string | null;
     registered_at?: string | null;
     subscribed_apps_at?: string | null;
@@ -310,12 +312,8 @@ export function WhatsAppConfig() {
 
       if (tokenEdited && accessToken !== MASKED_TOKEN && accessToken.trim()) {
         payload.access_token = accessToken.trim();
-      } else if (config) {
-        // Existing config — reuse stored encrypted token by decrypting on the
-        // server. But our POST handler requires an access_token to verify
-        // with Meta. If the user didn't change the token, we need to signal
-        // that. Simplest: require token re-entry if they're updating.
-        toast.error(t('reenterAccessToken'));
+      } else if (!config) {
+        toast.error(t('accessTokenRequired'));
         setSaving(false);
         return;
       }
@@ -445,6 +443,44 @@ export function WhatsAppConfig() {
       toast.error(t('verifyEndpointUnreachable'));
     } finally {
       setVerifyingRegistration(false);
+    }
+  }
+
+  async function handleRegisterNumber() {
+    if (!pin.trim() || !/^\d{6}$/.test(pin.trim())) {
+      toast.error(t('pinDigits') || 'Please enter a valid 6-digit numeric PIN.');
+      return;
+    }
+    setRegistering(true);
+    setSaveFailure(null);
+    try {
+      const res = await fetch('/api/whatsapp/config/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: pin.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSaveFailure({
+          message: data.error || t('saveFailed'),
+          meta: data.meta ?? null,
+        });
+        toast.error(data.error || t('saveFailed'), { duration: 10000 });
+      } else {
+        setSaveFailure(null);
+        toast.success(
+          data.already_registered
+            ? 'Phone number is already registered with Meta.'
+            : 'Phone number successfully registered with WhatsApp Cloud API!'
+        );
+        setPin('');
+        if (accountId) await fetchConfig(accountId);
+      }
+    } catch (err) {
+      console.error('Registration failed:', err);
+      toast.error(t('saveFailed'));
+    } finally {
+      setRegistering(false);
     }
   }
 
@@ -724,6 +760,11 @@ export function WhatsAppConfig() {
                         <span className="size-3 rounded-full border border-border shrink-0" />
                       )}
                       <code className="text-muted-foreground">{k}</code>
+                      {typeof v === 'string' && (
+                        <span className="font-mono text-[10px] text-foreground bg-muted px-1.5 py-0.5 rounded border border-border">
+                          {v}
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -842,6 +883,39 @@ export function WhatsAppConfig() {
                 }
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground tracking-widest"
               />
+              <div className="flex items-center gap-2 pt-1">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleRegisterNumber}
+                  disabled={registering || saving || !config || pin.trim().length !== 6}
+                  className="gap-1.5"
+                >
+                  {registering ? (
+                    <>
+                      <Loader2 className="size-3.5 animate-spin" />
+                      Registering with Meta...
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="size-3.5" />
+                      Register Phone Number
+                    </>
+                  )}
+                </Button>
+                {isRegistered ? (
+                  <span className="text-xs text-emerald-400 flex items-center gap-1 font-medium">
+                    <CheckCircle2 className="size-3.5" />
+                    Registered with Meta
+                  </span>
+                ) : (
+                  <span className="text-xs text-amber-400 flex items-center gap-1">
+                    <AlertTriangle className="size-3.5" />
+                    Not registered yet
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
                 <span dangerouslySetInnerHTML={{ __html: t('pinHint') }} />
               </p>

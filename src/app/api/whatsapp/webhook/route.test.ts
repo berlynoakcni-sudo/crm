@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // Shared, hoisted state the module mocks close over. Reset per test.
 const h = vi.hoisted(() => ({
@@ -51,7 +51,11 @@ vi.mock('next/server', () => ({
     h.state.afterCallbacks.push(cb)
   },
   NextResponse: {
-    json: (body: unknown, init?: { status?: number }) => ({ body, init }),
+    json: (body: unknown, init?: { status?: number }) => ({
+      body,
+      init,
+      status: init?.status ?? 200,
+    }),
   },
 }))
 
@@ -252,9 +256,14 @@ vi.mock('@/lib/contacts/dedupe', () => ({
   isUniqueViolation: () => false,
 }))
 
-vi.mock('@/lib/whatsapp/webhook-signature', () => ({
-  verifyMetaWebhookSignature: () => true,
-}))
+vi.mock('@/lib/whatsapp/webhook-signature', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/whatsapp/webhook-signature')>()
+  return {
+    ...actual,
+    verifyMetaWebhookSignature: () => true,
+  }
+})
 vi.mock('@/lib/whatsapp/template-webhook', () => ({
   isTemplateWebhookField: (field: string) =>
     field.startsWith('message_template_'),
@@ -277,7 +286,7 @@ vi.mock('@/lib/whatsapp/message-status-sync', () => ({
   applyMessageStatus: h.applyMessageStatus,
 }))
 
-import { POST } from './route'
+import { GET, POST } from './route'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { findExistingContact } from '@/lib/contacts/dedupe'
 import { handleTemplateWebhookChange } from '@/lib/whatsapp/template-webhook'
@@ -1173,3 +1182,52 @@ describe('inbound webhook: first_inbound_message fires once', () => {
     expect(h.state.firstInboundClaims).toBe(0)
   })
 })
+
+describe('webhook GET verification', () => {
+  const originalEnv = process.env.WHATSAPP_VERIFY_TOKEN
+
+  beforeEach(() => {
+    process.env.WHATSAPP_VERIFY_TOKEN = 'nikhil'
+  })
+
+  afterEach(() => {
+    process.env.WHATSAPP_VERIFY_TOKEN = originalEnv
+  })
+
+  it('returns challenge as text with status 200 when token and mode match', async () => {
+    const req = new Request(
+      'http://localhost/api/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=nikhil&hub.challenge=123456',
+      { method: 'GET' },
+    )
+    const res = await GET(req)
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('123456')
+  })
+
+  it('returns 403 when verify_token does not match', async () => {
+    const req = new Request(
+      'http://localhost/api/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=wrong_token&hub.challenge=123456',
+      { method: 'GET' },
+    )
+    const res = await GET(req)
+    expect(res.status).toBe(403)
+  })
+
+  it('returns 403 when hub.mode is not subscribe', async () => {
+    const req = new Request(
+      'http://localhost/api/whatsapp/webhook?hub.mode=unsubscribe&hub.verify_token=nikhil&hub.challenge=123456',
+      { method: 'GET' },
+    )
+    const res = await GET(req)
+    expect(res.status).toBe(403)
+  })
+
+  it('returns 400 when parameters are missing', async () => {
+    const req = new Request('http://localhost/api/whatsapp/webhook', {
+      method: 'GET',
+    })
+    const res = await GET(req)
+    expect(res.status).toBe(400)
+  })
+})
+

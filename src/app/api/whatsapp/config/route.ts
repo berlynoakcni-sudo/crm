@@ -265,7 +265,27 @@ export async function POST(request: Request) {
     const body = await request.json()
     const { phone_number_id, waba_id, access_token, verify_token, pin } = body
 
-    if (!access_token || !phone_number_id) {
+    // Look up any pre-existing row for this account.
+    const { data: existing } = await supabase
+      .from('whatsapp_config')
+      .select('id, registered_at, phone_number_id, verify_token, access_token')
+      .eq('account_id', accountId)
+      .maybeSingle()
+
+    let effectiveAccessToken = access_token
+    if (
+      (!effectiveAccessToken || typeof effectiveAccessToken !== 'string' || !effectiveAccessToken.trim()) &&
+      existing?.access_token &&
+      existing?.phone_number_id === phone_number_id
+    ) {
+      try {
+        effectiveAccessToken = decrypt(existing.access_token)
+      } catch (err) {
+        console.error('Failed to decrypt existing access token:', err)
+      }
+    }
+
+    if (!effectiveAccessToken || !phone_number_id) {
       return NextResponse.json(
         { error: t('whatsappConfig.credentialsRequired') },
         { status: 400 }
@@ -344,7 +364,7 @@ export async function POST(request: Request) {
     try {
       phoneInfo = await verifyPhoneNumber({
         phoneNumberId: phone_number_id,
-        accessToken: access_token,
+        accessToken: effectiveAccessToken,
       })
     } catch (err) {
       return metaFailure(err, 'verify_number', metaCtx)
@@ -359,7 +379,7 @@ export async function POST(request: Request) {
       try {
         wabaNumbers = await listWabaPhoneNumbers({
           wabaId: waba_id,
-          accessToken: access_token,
+          accessToken: effectiveAccessToken,
         })
       } catch (err) {
         return metaFailure(err, 'waba_phone_numbers', metaCtx)
@@ -383,23 +403,11 @@ export async function POST(request: Request) {
       }
     }
 
-    // Look up any pre-existing row for this account. Two reasons: we need
-    // to know whether this number is already registered with Meta (so we
-    // can skip /register when the user didn't provide a PIN this time
-    // around), and we need the stored verify_token — the settings form
-    // never shows it, so a save that leaves the field blank must keep it
-    // rather than null it out.
-    const { data: existing } = await supabase
-      .from('whatsapp_config')
-      .select('id, registered_at, phone_number_id, verify_token')
-      .eq('account_id', accountId)
-      .maybeSingle()
-
     // Encrypt sensitive tokens before storing
     let encryptedAccessToken: string
     let encryptedVerifyToken: string | null
     try {
-      encryptedAccessToken = encrypt(access_token)
+      encryptedAccessToken = encrypt(effectiveAccessToken)
       encryptedVerifyToken = resolveVerifyTokenForSave(
         verify_token,
         existing?.verify_token ?? null
@@ -452,7 +460,7 @@ export async function POST(request: Request) {
         try {
           await registerPhoneNumber({
             phoneNumberId: phone_number_id,
-            accessToken: access_token,
+            accessToken: effectiveAccessToken,
             pin,
           })
           registeredAt = new Date().toISOString()
@@ -485,7 +493,7 @@ export async function POST(request: Request) {
       try {
         await subscribeWabaToApp({
           wabaId: waba_id,
-          accessToken: access_token,
+          accessToken: effectiveAccessToken,
         })
         subscribedAppsAt = new Date().toISOString()
       } catch (err) {

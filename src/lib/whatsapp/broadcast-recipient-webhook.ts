@@ -30,14 +30,15 @@ export async function applyBroadcastRecipientStatus(
   db: SupabaseClient,
   event: RecipientStatusEvent
 ): Promise<RecipientStatusOutcome> {
-  if (!isRecipientStatus(event.status)) return 'skipped';
-  const predecessors = allowedPredecessors(event.status);
+  const status = event.status === 'seen' ? 'read' : event.status;
+  if (!isRecipientStatus(status)) return 'skipped';
+  const predecessors = allowedPredecessors(status);
   if (predecessors.length === 0) return 'skipped';
 
-  const update: Record<string, unknown> = { status: event.status };
-  if (event.status === 'sent') update.sent_at = event.occurredAt;
-  if (event.status === 'delivered') update.delivered_at = event.occurredAt;
-  if (event.status === 'read') update.read_at = event.occurredAt;
+  const update: Record<string, unknown> = { status };
+  if (status === 'sent') update.sent_at = event.occurredAt;
+  if (status === 'delivered') update.delivered_at = event.occurredAt;
+  if (status === 'read') update.read_at = event.occurredAt;
   if (event.failure) update.error_message = failureMessage(event.failure);
 
   const { data, error } = await db

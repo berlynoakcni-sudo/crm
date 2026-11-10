@@ -97,6 +97,8 @@ export async function GET() {
     phone_metadata_ok: boolean
     waba_subscribed_to_app: boolean | null
     locally_marked_registered: boolean
+    meta_status?: string | null
+    code_verification_status?: string | null
   } = {
     config_exists: true,
     token_decryptable: true,
@@ -107,12 +109,17 @@ export async function GET() {
   const errors: string[] = []
 
   // 1. Phone metadata
+  let phoneInfo = null
   try {
-    await verifyPhoneNumber({
+    phoneInfo = await verifyPhoneNumber({
       phoneNumberId: config.phone_number_id,
       accessToken,
     })
     checks.phone_metadata_ok = true
+    if (phoneInfo.status) checks.meta_status = phoneInfo.status
+    if (phoneInfo.code_verification_status) {
+      checks.code_verification_status = phoneInfo.code_verification_status
+    }
   } catch (err) {
     errors.push(
       t('whatsappConfig.phoneCheckFailed', { message: err instanceof Error ? err.message : String(err) }),
@@ -156,6 +163,7 @@ export async function GET() {
     live,
     checks,
     errors,
+    phone_info: phoneInfo,
     last_registration_error: config.last_registration_error ?? null,
     registered_at: config.registered_at ?? null,
     subscribed_apps_at: config.subscribed_apps_at ?? null,

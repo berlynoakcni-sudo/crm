@@ -152,65 +152,76 @@ export async function GET(request: Request) {
     const challenge = searchParams.get('hub.challenge')
     const verifyToken = searchParams.get('hub.verify_token')
 
-    if (mode !== 'subscribe' || !challenge || !verifyToken) {
+    if (!mode || !challenge || !verifyToken) {
       return NextResponse.json(
         { error: 'Missing verification parameters' },
         { status: 400 }
       )
     }
 
-    // Fetch all whatsapp configs to check verify tokens
-    const { data: configs, error: configError } = await supabaseAdmin()
-      .from('whatsapp_config')
-      .select('id, verify_token')
-
-    if (configError || !configs) {
-      console.error('Error fetching configs for verification:', configError)
+    if (mode !== 'subscribe') {
       return NextResponse.json(
-        { error: 'Verification failed' },
+        { error: 'Invalid mode' },
         { status: 403 }
       )
     }
 
-    // Check if any config's verify_token matches. Also collect the
-    // matching row so we can opportunistically upgrade its token to
-    // GCM if it was still in the legacy CBC format.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let matchedConfig: any = null
-    for (const config of configs) {
-      if (!config.verify_token) continue
-      try {
-        if (verifyTokenMatches(decrypt(config.verify_token), verifyToken)) {
-          matchedConfig = config
-          break
-        }
-      } catch {
-        // Malformed / wrong-key token row — skip it and keep checking.
-      }
-    }
-
-    if (matchedConfig) {
-      // Fire-and-forget GCM upgrade. Safe to run on every subscribe
-      // since it's a no-op once the column is already GCM.
-      if (isLegacyFormat(matchedConfig.verify_token)) {
-        void supabaseAdmin()
-          .from('whatsapp_config')
-          .update({ verify_token: encrypt(verifyToken) })
-          .eq('id', matchedConfig.id)
-          .then(({ error }: { error: unknown }) => {
-            if (error) {
-              console.warn(
-                '[webhook] verify_token GCM upgrade failed:',
-                (error as { message?: string })?.message ?? error,
-              )
-            }
-          })
-      }
-      // Return challenge as plain text
+    // 1. Verify against WHATSAPP_VERIFY_TOKEN from environment variables
+    const envVerifyToken = process.env.WHATSAPP_VERIFY_TOKEN
+    if (envVerifyToken && verifyTokenMatches(envVerifyToken, verifyToken)) {
       return new Response(challenge, {
         status: 200,
         headers: { 'Content-Type': 'text/plain' },
       })
+    }
+
+    // 2. Fallback: check database configs (multi-tenant / dashboard-configured tokens)
+    try {
+      const { data: configs, error: configError } = await supabaseAdmin()
+        .from('whatsapp_config')
+        .select('id, verify_token')
+
+      if (!configError && configs) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let matchedConfig: any = null
+        for (const config of configs) {
+          if (!config.verify_token) continue
+          try {
+            if (verifyTokenMatches(decrypt(config.verify_token), verifyToken)) {
+              matchedConfig = config
+              break
+            }
+          } catch {
+            // Malformed / wrong-key token row — skip it and keep checking.
+          }
+        }
+
+        if (matchedConfig) {
+          // Fire-and-forget GCM upgrade. Safe to run on every subscribe
+          // since it's a no-op once the column is already GCM.
+          if (isLegacyFormat(matchedConfig.verify_token)) {
+            void supabaseAdmin()
+              .from('whatsapp_config')
+              .update({ verify_token: encrypt(verifyToken) })
+              .eq('id', matchedConfig.id)
+              .then(({ error }: { error: unknown }) => {
+                if (error) {
+                  console.warn(
+                    '[webhook] verify_token GCM upgrade failed:',
+                    (error as { message?: string })?.message ?? error,
+                  )
+                }
+              })
+          }
+          // Return challenge as plain text
+          return new Response(challenge, {
+            status: 200,
+            headers: { 'Content-Type': 'text/plain' },
+          })
+        }
+      }
+    } catch (dbError) {
+      console.warn('[webhook] Database verify_token lookup skipped:', dbError)
     }
 
     return NextResponse.json(
@@ -337,7 +348,15 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           value.metadata?.phone_number_id
         )
         for (const status of value.statuses) {
-          await handleStatusUpdate(status, statusAccountId)
+          try {
+            await handleStatusUpdate(status, statusAccountId)
+          } catch (statusError) {
+            console.error(
+              'Error handling WhatsApp status update for:',
+              status.id,
+              statusError
+            )
+          }
         }
       }
 
@@ -439,12 +458,16 @@ async function handleStatusUpdate(
     )
   }
 
+  const normalizedStatus = status.status === 'seen' ? 'read' : status.status
+  const occurredAt =
+    metaTimestampToIso(status.timestamp) ?? new Date().toISOString()
+
   const advancedMessages = accountId
     ? await applyMessageStatus(supabaseAdmin(), accountId, {
         wamid: status.id,
-        status: status.status,
+        status: normalizedStatus,
         failure,
-        statusAt: metaTimestampToIso(status.timestamp),
+        statusAt: occurredAt,
       })
     : []
 
@@ -458,8 +481,8 @@ async function handleStatusUpdate(
   //    sent/delivered/read/failed counts automatically.
   await applyBroadcastRecipientStatus(supabaseAdmin(), {
     whatsappMessageId: status.id,
-    status: status.status,
-    occurredAt: new Date(parseInt(status.timestamp) * 1000).toISOString(),
+    status: normalizedStatus,
+    occurredAt,
     failure,
   })
 
