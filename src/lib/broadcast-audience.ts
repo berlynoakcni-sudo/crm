@@ -16,6 +16,7 @@ export type AudienceType = 'all' | 'tags' | 'custom_field' | 'csv';
 export interface CsvAudienceRow {
   phone: string;
   name?: string;
+  custom_fields?: Record<string, string>;
 }
 
 export interface AudienceConfig {

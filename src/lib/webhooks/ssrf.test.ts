@@ -92,6 +92,8 @@ describe('isPrivateOrReservedIp', () => {
     }
     // A 6to4 address wrapping public IPv4 space is still routable.
     expect(isPrivateOrReservedIp('2002:808:808::')).toBe(false);
+    // A NAT64 well-known prefix wrapping public IPv4 space is also routable.
+    expect(isPrivateOrReservedIp('64:ff9b::808:808')).toBe(false);
   });
 
   it('fails closed on anything it cannot parse', () => {

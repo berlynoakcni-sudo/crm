@@ -94,9 +94,9 @@ export function Step4ScheduleSend({
       <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
         <p className="text-sm font-medium text-foreground">{t('scheduleSend.summary')}</p>
         <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs text-muted-foreground">{t('scheduleSend.template')}</p>
-            <p className="text-foreground">{template.name}</p>
+            <p className="text-foreground break-all font-medium">{template.name}</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">{t('scheduleSend.audience')}</p>

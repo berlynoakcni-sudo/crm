@@ -11,6 +11,8 @@ describe('parseBroadcastCsv', () => {
 
     expect(result).toEqual({
       ok: true,
+      headers: ['phone', 'name'],
+      customColumns: [],
       duplicates: 0,
       invalid: 0,
       contacts: [
@@ -24,6 +26,8 @@ describe('parseBroadcastCsv', () => {
     const result = parseBroadcastCsv(`phone\n+15551230000`);
     expect(result).toEqual({
       ok: true,
+      headers: ['phone'],
+      customColumns: [],
       duplicates: 0,
       invalid: 0,
       contacts: [{ phone: '+15551230000' }],
@@ -37,6 +41,8 @@ describe('parseBroadcastCsv', () => {
     );
     expect(result).toEqual({
       ok: true,
+      headers: ['phone', 'name', 'email', 'company', 'tags'],
+      customColumns: [],
       duplicates: 0,
       invalid: 0,
       contacts: [{ phone: '+15551230000', name: 'Ada' }],
@@ -47,6 +53,8 @@ describe('parseBroadcastCsv', () => {
     const result = parseBroadcastCsv(`name,phone\nAda,+15551230000`);
     expect(result).toEqual({
       ok: true,
+      headers: ['name', 'phone'],
+      customColumns: [],
       duplicates: 0,
       invalid: 0,
       contacts: [{ phone: '+15551230000', name: 'Ada' }],
@@ -66,6 +74,8 @@ describe('parseBroadcastCsv', () => {
 
     expect(result).toEqual({
       ok: true,
+      headers: ['phone', 'name'],
+      customColumns: [],
       duplicates: 1,
       invalid: 0,
       contacts: [{ phone: '+1 (555) 123-0000', name: 'Ada' }],
@@ -88,6 +98,8 @@ describe('parseBroadcastCsv', () => {
 
     expect(result).toEqual({
       ok: true,
+      headers: ['phone', 'name'],
+      customColumns: [],
       duplicates: 0,
       invalid: 2,
       contacts: [{ phone: '+14155551212', name: 'Ada' }],
@@ -126,11 +138,37 @@ describe('parseBroadcastCsv', () => {
     );
     expect(result).toEqual({
       ok: true,
+      headers: ['phone', 'name'],
+      customColumns: [],
       duplicates: 0,
       invalid: 0,
       contacts: [
         { phone: '+15551230000', name: 'Ada' },
         { phone: '+15559990000', name: 'Grace' },
+      ],
+    });
+  });
+
+  it('preserves dynamic custom columns in contacts', () => {
+    const result = parseBroadcastCsv(
+      `phone,name,order_no,amount,city\n+15551230000,Ada,ORD-101,499.00,Mumbai`
+    );
+    expect(result).toEqual({
+      ok: true,
+      headers: ['phone', 'name', 'order_no', 'amount', 'city'],
+      customColumns: ['order_no', 'amount', 'city'],
+      duplicates: 0,
+      invalid: 0,
+      contacts: [
+        {
+          phone: '+15551230000',
+          name: 'Ada',
+          custom_fields: {
+            order_no: 'ORD-101',
+            amount: '499.00',
+            city: 'Mumbai',
+          },
+        },
       ],
     });
   });

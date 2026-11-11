@@ -137,11 +137,16 @@ function isReservedIPv6(b: number[]): boolean {
   // space; nothing in it is a routable webhook target.
   if (zerosThrough(12)) return true;
 
-  // NAT64 64:ff9b::/32 — covers the well-known /96 prefix and the
-  // local-use 64:ff9b:1::/48. RFC 6052 allows the embedded IPv4 at
-  // several offsets, so block the whole prefix rather than guessing
-  // which one is in play.
+  // NAT64 64:ff9b::/32 — covers the well-known /96 prefix (RFC 6052)
+  // and local-use 64:ff9b:1::/48 (RFC 8215).
+  // For the Well-Known Prefix 64:ff9b::/96 (common on dual-stack / DNS64
+  // networks such as Indian mobile/broadband ISPs), bytes 4..11 are zero
+  // and bytes 12..15 embed the destination IPv4 address. Classify the
+  // IPv4 target it actually delivers to.
   if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b) {
+    if (b.slice(4, 12).every((x) => x === 0)) {
+      return isReservedIPv4(b.slice(12));
+    }
     return true;
   }
 

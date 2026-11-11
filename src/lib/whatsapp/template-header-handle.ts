@@ -45,9 +45,23 @@ export async function ensureMediaHeaderHandle(
   // member can submit a template) and the fetch below happens server-side,
   // so refuse any destination that resolves to a private / loopback /
   // link-local / reserved address. Same guard as the two other
-  // outbound-fetch call sites (see lib/webhooks/ssrf.ts) — matching the
-  // unreachable-host message keeps the failure from being an oracle.
-  if (!(await isDeliverableUrl(payload.header_media_url))) {
+  // outbound-fetch call sites (see lib/webhooks/ssrf.ts).
+  // Allow our own Supabase storage host explicitly.
+  const supabaseHost = process.env.NEXT_PUBLIC_SUPABASE_URL
+    ? (() => {
+        try {
+          return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname
+        } catch {
+          return undefined
+        }
+      })()
+    : undefined
+
+  const deliverable = supabaseHost
+    ? await isDeliverableUrl(payload.header_media_url, { allowPrivateHosts: [supabaseHost] })
+    : await isDeliverableUrl(payload.header_media_url)
+
+  if (!deliverable) {
     throw new Error(unreachableMessage())
   }
 

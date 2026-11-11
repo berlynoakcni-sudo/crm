@@ -12,6 +12,7 @@ import {
   Pencil,
   RotateCcw,
   Upload,
+  Eye,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -190,6 +191,15 @@ export function TemplateManager() {
       return { ...prev, body_samples: next };
     });
   }, [bodyVarCount]);
+
+  function handleAddBodyVariable() {
+    const nextIndex = bodyVarCount + 1;
+    const insertion = `{{${nextIndex}}}`;
+    setForm((prev) => ({
+      ...prev,
+      body_text: prev.body_text ? `${prev.body_text} ${insertion}` : insertion,
+    }));
+  }
 
   useEffect(() => {
     if (authLoading) return;
@@ -553,16 +563,18 @@ export function TemplateManager() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-3 xl:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-2">
           {templates.map((template) => {
             const statusKey = template.status || 'DRAFT';
             const status = templateStatusConfig[statusKey];
             return (
-              <Card key={template.id}>
-                <CardContent className="flex items-start justify-between pt-4">
-                  <div className="space-y-2 min-w-0 flex-1">
+              <Card key={template.id} className="flex flex-col justify-between">
+                <CardContent className="p-4 sm:p-5 flex items-start justify-between gap-3">
+                  <div className="space-y-2.5 min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-medium text-foreground">{template.name}</h3>
+                      <h3 className="font-semibold text-foreground truncate max-w-[200px]" title={template.name}>
+                        {template.name}
+                      </h3>
                       <Badge
                         className={`text-xs border ${categoryColors[template.category] || ''}`}
                       >
@@ -572,7 +584,7 @@ export function TemplateManager() {
                         {status.label}
                       </Badge>
                       {template.language && (
-                        <span className="text-xs text-muted-foreground uppercase">
+                        <span className="text-[11px] font-mono text-muted-foreground uppercase px-1.5 py-0.5 rounded bg-muted border border-border">
                           {template.language}
                         </span>
                       )}
@@ -591,24 +603,24 @@ export function TemplateManager() {
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-muted-foreground line-clamp-2">
+                    <p className="text-sm text-muted-foreground line-clamp-3 whitespace-pre-wrap">
                       {template.body_text}
                     </p>
                     {template.footer_text && (
-                      <p className="text-xs text-muted-foreground italic">
+                      <p className="text-xs text-muted-foreground/80 italic">
                         {template.footer_text}
                       </p>
                     )}
                     {(template.rejection_reason || template.submission_error) && (
-                      <div className="flex items-start gap-1.5 text-xs text-red-400 bg-red-950/20 border border-red-900/40 rounded px-2 py-1.5">
+                      <div className="flex items-start gap-1.5 text-xs text-red-400 bg-red-950/20 border border-red-900/40 rounded px-2.5 py-1.5">
                         <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
-                        <span>
+                        <span className="break-words">
                           {template.rejection_reason || template.submission_error}
                         </span>
                       </div>
                     )}
                   </div>
-                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                  <div className="flex items-center gap-1 shrink-0 ml-1">
                     {statusKey === 'APPROVED' && (
                       <Button
                         variant="ghost"
@@ -701,18 +713,24 @@ export function TemplateManager() {
               <Input
                 placeholder={t('namePlaceholder')}
                 value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    name: e.target.value
+                      .toLowerCase()
+                      .replace(/\s+/g, '_')
+                      .replace(/[^a-z0-9_]/g, ''),
+                  })
+                }
                 disabled={editingId !== null}
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground disabled:opacity-60 disabled:cursor-not-allowed"
               />
               <p className="text-[11px] text-muted-foreground">
-                {editingId
-                  ? t('nameFixed')
-                  : t('nameHint')}
+                {editingId ? t('nameFixed') : t('nameHint')}
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
               <div className="space-y-2">
                 <Label className="text-muted-foreground">{t('category')}</Label>
                 <Select
@@ -740,9 +758,13 @@ export function TemplateManager() {
                     ))}
                   </SelectContent>
                 </Select>
-                {categoryLocked && (
+                {categoryLocked ? (
                   <p className="text-[11px] text-muted-foreground">
                     {t('categoryFixed')}
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground invisible select-none">
+                    &nbsp;
                   </p>
                 )}
               </div>
@@ -779,12 +801,6 @@ export function TemplateManager() {
               <Select
                 value={form.header_format}
                 onValueChange={(val) =>
-                  // Preserve header_content, header_media_url, and
-                  // header_sample across format switches. The submit
-                  // payload builder only reads the field that matches
-                  // the active format, so an orphan value on a hidden
-                  // field is harmless — and keeping it lets the user
-                  // switch formats to compare without losing typing.
                   setForm({
                     ...form,
                     header_format: (val || 'none') as HeaderFormat,
@@ -829,85 +845,113 @@ export function TemplateManager() {
                     className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
                   />
                   {headerVarCount > 0 && (
-                    <Input
-                      id="template-header-sample"
-                      aria-label={t('headerSampleAria')}
-                      placeholder={t.raw('headerSamplePlaceholder')}
-                      value={form.header_sample}
-                      onChange={(e) =>
-                        setForm({ ...form, header_sample: e.target.value })
-                      }
-                      className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
-                    />
+                    <div className="flex items-center gap-2 pt-1">
+                      <span className="shrink-0 font-mono text-xs font-semibold px-2.5 py-1.5 rounded-md bg-primary/10 text-primary border border-primary/20 min-w-[50px] text-center">
+                        {"{{1}}"}
+                      </span>
+                      <Input
+                        id="template-header-sample"
+                        aria-label={t('headerSampleAria')}
+                        placeholder={t.raw('headerSamplePlaceholder')}
+                        value={form.header_sample}
+                        onChange={(e) =>
+                          setForm({ ...form, header_sample: e.target.value })
+                        }
+                        className="flex-1 bg-muted border-border text-foreground placeholder:text-muted-foreground h-9 text-xs"
+                      />
+                    </div>
                   )}
                 </div>
               )}
 
               {headerNeedsMedia && (
-                <div className="space-y-2 mt-2">
+                <div className="space-y-3 mt-2 rounded-lg border border-border bg-muted/30 p-3">
                   {headerMediaKind && (
-                    <div className="flex items-center gap-2">
-                      <input
-                        ref={headerFileRef}
-                        type="file"
-                        accept={MEDIA_HEADER_SPECS[headerMediaKind].mimeTypes.join(',')}
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) void handleHeaderMediaFile(f, headerMediaKind);
-                          e.target.value = '';
-                        }}
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={uploadingHeader}
-                        onClick={() => headerFileRef.current?.click()}
-                      >
-                        {uploadingHeader ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Upload className="h-3.5 w-3.5" />
-                        )}
-                        {t(uploadLabelKey[headerMediaKind])}
-                      </Button>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <input
+                          ref={headerFileRef}
+                          type="file"
+                          accept={MEDIA_HEADER_SPECS[headerMediaKind].mimeTypes.join(',')}
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) void handleHeaderMediaFile(f, headerMediaKind);
+                            e.target.value = '';
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={uploadingHeader}
+                          onClick={() => headerFileRef.current?.click()}
+                          className="h-8 gap-1.5"
+                        >
+                          {uploadingHeader ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Upload className="h-3.5 w-3.5" />
+                          )}
+                          {t(uploadLabelKey[headerMediaKind])}
+                        </Button>
+                      </div>
                       <span className="text-[11px] text-muted-foreground">
                         {t(uploadHintKey[headerMediaKind])}
                       </span>
                     </div>
                   )}
-                  <Input
-                    placeholder={t('mediaUrlPlaceholder', { format: form.header_format })}
-                    value={form.header_media_url}
-                    onChange={(e) =>
-                      setForm({ ...form, header_media_url: e.target.value })
-                    }
-                    className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
-                  />
-                  {form.header_format === 'image' && form.header_media_url && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={form.header_media_url}
-                      alt={t('headerSampleAlt')}
-                      className="max-h-28 rounded-md border border-border object-contain"
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">
+                      {"Or paste media URL"}
+                    </Label>
+                    <Input
+                      placeholder={t('mediaUrlPlaceholder', { format: form.header_format })}
+                      value={form.header_media_url}
+                      onChange={(e) =>
+                        setForm({ ...form, header_media_url: e.target.value })
+                      }
+                      className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-9 text-xs"
                     />
+                  </div>
+
+                  {form.header_format === 'image' && form.header_media_url && (
+                    <div className="flex items-center justify-center p-2 rounded-md border border-border bg-background/50">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={form.header_media_url}
+                        alt={t('headerSampleAlt')}
+                        className="max-h-36 rounded border border-border object-contain"
+                      />
+                    </div>
                   )}
+
                   <p className="text-[11px] text-muted-foreground leading-relaxed">
                     {form.header_format === 'image'
                       ? t('imageHint')
                       : t('mediaHint')}
-                    {form.header_format === 'video' &&
-                      t('videoHint')}
-                    {form.header_format === 'document' &&
-                      t('documentHint')}
+                    {form.header_format === 'video' && t('videoHint')}
+                    {form.header_format === 'document' && t('documentHint')}
                   </p>
                 </div>
               )}
             </div>
 
             <div className="space-y-2">
-              <Label className="text-muted-foreground">{t('bodyText')}</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-muted-foreground">{t('bodyText')}</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAddBodyVariable}
+                  className="h-7 text-xs border-border bg-transparent text-muted-foreground hover:bg-muted"
+                >
+                  <Plus className="size-3 mr-1" />
+                  {`+ Add {{${bodyVarCount + 1}}}`}
+                </Button>
+              </div>
               <Textarea
                 placeholder={t.raw('bodyPlaceholder')}
                 value={form.body_text}
@@ -916,35 +960,46 @@ export function TemplateManager() {
                 }
                 rows={4}
                 maxLength={TEMPLATE_LIMITS.bodyMaxLength}
-                className="bg-muted border-border text-foreground placeholder:text-muted-foreground resize-none"
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[110px] resize-y"
               />
               <p className="text-[11px] text-muted-foreground">
                 {t.raw('bodyHint')}
               </p>
 
               {bodyVarCount > 0 && (
-                <div className="space-y-1.5 pt-1">
-                  <Label className="text-[11px] text-muted-foreground">
-                    {t('sampleValues')}
-                  </Label>
-                  {form.body_samples.map((val, i) => {
-                    const inputId = `template-body-sample-${i}`;
-                    return (
-                      <Input
-                        key={i}
-                        id={inputId}
-                        aria-label={t('sampleAria', { var: `{{${i + 1}}}` })}
-                        placeholder={t('samplePlaceholder', { var: `{{${i + 1}}}` })}
-                        value={val}
-                        onChange={(e) => {
-                          const next = [...form.body_samples];
-                          next[i] = e.target.value;
-                          setForm({ ...form, body_samples: next });
-                        }}
-                        className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
-                      />
-                    );
-                  })}
+                <div className="space-y-2 pt-2 border-t border-border/50">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-medium text-foreground">
+                      {t('sampleValues')}
+                    </Label>
+                    <span className="text-[11px] text-muted-foreground">
+                      {`${bodyVarCount} variable${bodyVarCount > 1 ? 's' : ''} detected`}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {form.body_samples.map((val, i) => {
+                      const inputId = `template-body-sample-${i}`;
+                      return (
+                        <div key={i} className="flex items-center gap-2">
+                          <span className="shrink-0 font-mono text-xs font-semibold px-2.5 py-1.5 rounded-md bg-primary/10 text-primary border border-primary/20 min-w-[50px] text-center">
+                            {`{{${i + 1}}}`}
+                          </span>
+                          <Input
+                            id={inputId}
+                            aria-label={t('sampleAria', { var: `{{${i + 1}}}` })}
+                            placeholder={t('samplePlaceholder', { var: `{{${i + 1}}}` })}
+                            value={val}
+                            onChange={(e) => {
+                              const next = [...form.body_samples];
+                              next[i] = e.target.value;
+                              setForm({ ...form, body_samples: next });
+                            }}
+                            className="flex-1 bg-muted border-border text-foreground placeholder:text-muted-foreground h-9 text-xs"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
@@ -973,7 +1028,7 @@ export function TemplateManager() {
                   disabled={form.buttons.length >= TEMPLATE_LIMITS.maxButtonsTotal}
                   className="border-border bg-transparent text-muted-foreground hover:bg-muted h-7 text-xs"
                 >
-                  <Plus className="size-3" />
+                  <Plus className="size-3 mr-1" />
                   {t('addButton')}
                 </Button>
               </div>
@@ -982,24 +1037,21 @@ export function TemplateManager() {
                   {t('buttonsLimit', { max: TEMPLATE_LIMITS.maxButtonsTotal })}
                 </p>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {form.buttons.map((btn, i) => (
                     <div
                       key={i}
-                      className="space-y-2 rounded border border-border bg-muted/50 p-2"
+                      className="space-y-2.5 rounded-lg border border-border bg-muted/40 p-3"
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                         <Select
                           value={btn.type}
                           onValueChange={(val) => {
-                            // Same null guard as the Header Select
-                            // (per PR 148): @base-ui Select fires
-                            // onValueChange(null) on deselect.
                             if (!val) return;
                             changeButtonType(i, val as TemplateButton['type']);
                           }}
                         >
-                          <SelectTrigger className="w-40 bg-muted border-border text-foreground h-8 text-xs">
+                          <SelectTrigger className="w-full sm:w-44 bg-muted border-border text-foreground h-9 text-xs">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="bg-popover border-border">
@@ -1036,20 +1088,20 @@ export function TemplateManager() {
                           onChange={(e) =>
                             updateButton(i, { text: e.target.value })
                           }
-                          className="flex-1 bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+                          className="flex-1 bg-muted border-border text-foreground placeholder:text-muted-foreground h-9 text-xs"
                         />
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
                           onClick={() => removeButton(i)}
-                          className="text-muted-foreground hover:text-red-400 hover:bg-red-950/30 size-7"
+                          className="text-muted-foreground hover:text-red-400 hover:bg-red-950/30 size-9 shrink-0 self-end sm:self-auto"
                         >
-                          <X className="size-3.5" />
+                          <X className="size-4" />
                         </Button>
                       </div>
                       {btn.type === 'URL' && (
-                        <div className="space-y-1 pl-1">
+                        <div className="space-y-2 pt-1 border-t border-border/50">
                           <Input
                             placeholder={t.raw('urlPlaceholder')}
                             value={btn.url}
@@ -1071,29 +1123,95 @@ export function TemplateManager() {
                         </div>
                       )}
                       {btn.type === 'PHONE_NUMBER' && (
-                        <Input
-                          placeholder={t('phonePlaceholder')}
-                          value={btn.phone_number}
-                          onChange={(e) =>
-                            updateButton(i, { phone_number: e.target.value })
-                          }
-                          className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
-                        />
+                        <div className="pt-1 border-t border-border/50">
+                          <Input
+                            placeholder={t('phonePlaceholder')}
+                            value={btn.phone_number}
+                            onChange={(e) =>
+                              updateButton(i, { phone_number: e.target.value })
+                            }
+                            className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+                          />
+                        </div>
                       )}
                       {btn.type === 'COPY_CODE' && (
-                        <Input
-                          placeholder={t('codePlaceholder')}
-                          value={btn.example}
-                          onChange={(e) =>
-                            updateButton(i, { example: e.target.value })
-                          }
-                          className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
-                        />
+                        <div className="pt-1 border-t border-border/50">
+                          <Input
+                            placeholder={t('codePlaceholder')}
+                            value={btn.example}
+                            onChange={(e) =>
+                              updateButton(i, { example: e.target.value })
+                            }
+                            className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+                          />
+                        </div>
                       )}
                     </div>
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* Live Message Preview */}
+            <div className="rounded-xl border border-border bg-muted/20 p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span className="font-medium flex items-center gap-1.5 text-foreground">
+                  <Eye className="size-3.5 text-primary" />
+                  Live Preview
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  WhatsApp formatting preview
+                </span>
+              </div>
+
+              <div className="rounded-lg border border-border/80 bg-background/95 p-3.5 shadow-xs space-y-2 max-w-md">
+                {form.header_format === 'text' && form.header_content && (
+                  <p className="font-semibold text-xs text-foreground">
+                    {form.header_content.replace(/\{\{1\}\}/g, form.header_sample || '{{1}}')}
+                  </p>
+                )}
+                {form.header_format === 'image' && form.header_media_url && (
+                  <div className="overflow-hidden rounded-md border border-border bg-muted/40">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={form.header_media_url}
+                      alt="Preview"
+                      className="max-h-36 w-full object-contain"
+                    />
+                  </div>
+                )}
+                {(form.header_format === 'video' || form.header_format === 'document') && form.header_media_url && (
+                  <div className="rounded-md border border-border bg-muted/40 p-2 text-center text-xs text-muted-foreground">
+                    [{form.header_format.toUpperCase()} HEADER ATTACHED]
+                  </div>
+                )}
+                <p className="text-xs text-foreground/90 whitespace-pre-wrap leading-relaxed">
+                  {(() => {
+                    let text = form.body_text || 'Your message text...';
+                    form.body_samples.forEach((sample, idx) => {
+                      text = text.replaceAll(`{{${idx + 1}}}`, sample || `{{${idx + 1}}}`);
+                    });
+                    return text;
+                  })()}
+                </p>
+                {form.footer_text && (
+                  <p className="text-[11px] text-muted-foreground/80 italic pt-1 border-t border-border/40">
+                    {form.footer_text}
+                  </p>
+                )}
+                {form.buttons.length > 0 && (
+                  <div className="pt-2 border-t border-border/40 space-y-1.5">
+                    {form.buttons.map((b, i) => (
+                      <div
+                        key={i}
+                        className="text-center text-xs font-medium py-1.5 px-3 rounded-md bg-muted/60 text-primary border border-border/80"
+                      >
+                        {b.text || `Button ${i + 1}`}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

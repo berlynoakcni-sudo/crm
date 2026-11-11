@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Contact, CustomField, MessageTemplate } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -8,23 +8,47 @@ import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ArrowLeft, ArrowRight, Eye, ImageIcon, Loader2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  ImageIcon,
+  Loader2,
+  Sparkles,
+} from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { extractTemplateVariables } from '@/lib/whatsapp/template-validators';
+import {
+  extractAvailableFields,
+  renderPreviewText,
+  suggestVariableMappings,
+  type VariableMapping,
+  type VariableType,
+} from '@/lib/broadcast-mapping';
 
-type VariableType = 'static' | 'field' | 'custom_field';
-
-interface VariableMapping {
-  type: VariableType;
-  value: string;
-}
+export type { VariableMapping, VariableType };
 
 interface Step3Props {
   template: MessageTemplate;
+  audience?: {
+    type: 'all' | 'tags' | 'custom_field' | 'csv';
+    tagIds?: string[];
+    customField?: {
+      fieldId: string;
+      operator: 'is' | 'is_not' | 'contains';
+      value: string;
+    };
+    csvContacts?: { phone: string; name?: string; custom_fields?: Record<string, string> }[];
+    excludeTagIds?: string[];
+  };
   variables: Record<string, VariableMapping>;
   onUpdate: (variables: Record<string, VariableMapping>) => void;
   /** Media URL for an IMAGE/VIDEO/DOCUMENT header, when the template has one. */
@@ -63,13 +87,14 @@ const SAMPLE_CONTACT: Contact = {
   name: 'John Doe',
   phone: '+1234567890',
   email: 'john@example.com',
-  company: 'Acme Corp',
+  company: 'Royal Oak',
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 };
 
 export function Step3Personalize({
   template,
+  audience,
   variables,
   onUpdate,
   headerMediaUrl,
@@ -85,6 +110,7 @@ export function Step3Personalize({
     Map<string, string>
   >(new Map());
   const [loadingPreview, setLoadingPreview] = useState(true);
+  const [previewIndex, setPreviewIndex] = useState(0);
 
   // Load user's custom fields + a representative contact for the
   // live preview. Fall back to sample data if no contacts exist yet.
@@ -134,6 +160,59 @@ export function Step3Personalize({
     () => extractTemplateVariables(template.body_text).map((k) => `{{${k}}}`),
     [template.body_text],
   );
+
+  // Available standard contact fields and uploaded CSV columns
+  const { allFields, csvColumns } = useMemo(
+    () => extractAvailableFields(audience?.csvContacts),
+    [audience?.csvContacts],
+  );
+
+  // Auto-suggest mappings for unmapped variables when entering Step 3
+  const handleAutoSuggest = useCallback(() => {
+    if (placeholders.length === 0) return;
+    const suggestions = suggestVariableMappings(
+      template.body_text,
+      placeholders,
+      allFields,
+      customFields.map((cf) => ({ id: cf.id, name: cf.field_name })),
+    );
+    onUpdate({
+      ...variables,
+      ...suggestions,
+    });
+  }, [template.body_text, placeholders, allFields, customFields, variables, onUpdate]);
+
+  // Initial automatic mapping on mount if placeholders have no values yet
+  useEffect(() => {
+    if (placeholders.length === 0) return;
+    const unmappedPlaceholders = placeholders.filter((p) => {
+      const key = p.replace(/^\{\{|\}\}$/g, '');
+      const existing = variables[key];
+      return !existing || (!existing.value && existing.type === 'static');
+    });
+
+    if (unmappedPlaceholders.length === 0) return;
+
+    const suggestions = suggestVariableMappings(
+      template.body_text,
+      unmappedPlaceholders,
+      allFields,
+      customFields.map((cf) => ({ id: cf.id, name: cf.field_name })),
+    );
+
+    let hasChanges = false;
+    const nextVariables = { ...variables };
+    for (const [key, sug] of Object.entries(suggestions)) {
+      if (sug.value && (!variables[key] || !variables[key].value)) {
+        nextVariables[key] = sug;
+        hasChanges = true;
+      }
+    }
+
+    if (hasChanges) {
+      onUpdate(nextVariables);
+    }
+  }, [template.body_text, placeholders, allFields, customFields]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Templates with an IMAGE/VIDEO/DOCUMENT header need a media URL at
   // send time — Meta requires the media component on every delivery and
@@ -188,65 +267,81 @@ export function Step3Personalize({
     });
   }
 
-  /**
-   * Substitute placeholders using the first real contact where
-   * possible. Placeholders keyed by "{{N}}" or "{{name}}" map to
-   * variable key "N" / "name".
-   */
-  const previewText = useMemo(() => {
-    const contact = firstContact ?? {
+  // Active recipient for the live preview bubble
+  const activeRecipient = useMemo(() => {
+    if (audience?.type === 'csv' && audience.csvContacts && audience.csvContacts.length > 0) {
+      const safeIndex = Math.min(Math.max(0, previewIndex), audience.csvContacts.length - 1);
+      const row = audience.csvContacts[safeIndex];
+      return {
+        name: row.name,
+        phone: row.phone,
+        custom_fields: row.custom_fields,
+      };
+    }
+    if (firstContact) {
+      return {
+        name: firstContact.name,
+        phone: firstContact.phone,
+        email: firstContact.email,
+        company: firstContact.company,
+      };
+    }
+    return {
       ...SAMPLE_CONTACT,
       name: t('personalize.sampleName'),
       company: t('personalize.sampleCompany'),
     };
-    const customValues = firstContact
-      ? firstContactCustomValues
-      : new Map<string, string>();
+  }, [audience, previewIndex, firstContact, t]);
 
-    let text = template.body_text;
-    for (const placeholder of placeholders) {
-      const key = placeholder.replace(/^\{\{|\}\}$/g, '');
-      const mapping = variables[key];
-      let replacement = placeholder;
-
-      if (mapping) {
-        if (mapping.type === 'static' && mapping.value) {
-          replacement = mapping.value;
-        } else if (mapping.type === 'field' && mapping.value) {
-          const fieldMap: Record<string, string | undefined> = {
-            name: contact.name,
-            phone: contact.phone,
-            email: contact.email,
-            company: contact.company,
-          };
-          replacement = fieldMap[mapping.value] ?? placeholder;
-        } else if (mapping.type === 'custom_field' && mapping.value) {
-          replacement = customValues.get(mapping.value) || placeholder;
-        }
-      }
-      text = text.replaceAll(placeholder, replacement);
-    }
-    return text;
+  const previewText = useMemo(() => {
+    return renderPreviewText(
+      template.body_text,
+      placeholders,
+      variables,
+      activeRecipient,
+      firstContact ? firstContactCustomValues : undefined,
+    );
   }, [
     template.body_text,
-    variables,
     placeholders,
+    variables,
+    activeRecipient,
     firstContact,
     firstContactCustomValues,
-    t,
   ]);
 
-  const previewLabel = firstContact
-    ? firstContact.name || firstContact.phone
-    : t('personalize.previewSample');
+  const previewLabel = useMemo(() => {
+    if (audience?.type === 'csv' && audience.csvContacts && audience.csvContacts.length > 0) {
+      return activeRecipient.name
+        ? `${activeRecipient.name} (${activeRecipient.phone})`
+        : activeRecipient.phone || t('personalize.previewSample');
+    }
+    return firstContact
+      ? firstContact.name || firstContact.phone
+      : t('personalize.previewSample');
+  }, [audience, activeRecipient, firstContact, t]);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-foreground">{t('personalize.title')}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t('personalize.subtitle')}
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">{t('personalize.title')}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t('personalize.subtitle')}
+          </p>
+        </div>
+        {placeholders.length > 0 && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleAutoSuggest}
+            className="border-border text-foreground hover:bg-muted"
+          >
+            <Sparkles className="mr-1.5 h-3.5 w-3.5 text-primary" />
+            Auto-map variables
+          </Button>
+        )}
       </div>
 
       {mediaHeaderType && (
@@ -320,7 +415,8 @@ export function Step3Personalize({
                       {t('personalize.type')}
                     </label>
                     <Select
-                      value={mapping.type}
+                      key={`select-type-${key}`}
+                      value={mapping.type ?? 'static'}
                       onValueChange={(val) =>
                         updateVariable(key, {
                           type: val as VariableType,
@@ -347,7 +443,7 @@ export function Step3Personalize({
                     </label>
                     {mapping.type === 'static' ? (
                       <Input
-                        value={mapping.value}
+                        value={mapping.value ?? ''}
                         onChange={(e) =>
                           updateVariable(key, { value: e.target.value })
                         }
@@ -356,7 +452,8 @@ export function Step3Personalize({
                       />
                     ) : mapping.type === 'field' ? (
                       <Select
-                        value={mapping.value || undefined}
+                        key={`select-field-${key}`}
+                        value={mapping.value || ''}
                         onValueChange={(val) =>
                           updateVariable(key, { value: val || '' })
                         }
@@ -365,16 +462,34 @@ export function Step3Personalize({
                           <SelectValue placeholder={t('personalize.selectContactField')} />
                         </SelectTrigger>
                         <SelectContent className="border-border bg-popover">
-                          {contactFields.map((field) => (
-                            <SelectItem key={field.value} value={field.value}>
-                              {t(`personalize.fieldMap.${field.labelKey}`)}
-                            </SelectItem>
-                          ))}
+                          <SelectGroup>
+                            <SelectLabel className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                              Contact Fields
+                            </SelectLabel>
+                            {contactFields.map((field) => (
+                              <SelectItem key={field.value} value={field.value}>
+                                {t(`personalize.fieldMap.${field.labelKey}`)}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                          {csvColumns.length > 0 && (
+                            <SelectGroup>
+                              <SelectLabel className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                CSV Columns
+                              </SelectLabel>
+                              {csvColumns.map((col) => (
+                                <SelectItem key={col} value={col}>
+                                  <span className="font-mono">{col}</span>
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          )}
                         </SelectContent>
                       </Select>
                     ) : (
                       <Select
-                        value={mapping.value || undefined}
+                        key={`select-custom-${key}`}
+                        value={mapping.value || ''}
                         onValueChange={(val) =>
                           updateVariable(key, { value: val || '' })
                         }
@@ -410,12 +525,45 @@ export function Step3Personalize({
       {/* Live Preview — rendered as a WhatsApp-style bubble so the user
           sees approximately what the recipient will see. */}
       <div className="rounded-xl border border-border bg-card/50 p-4">
-        <div className="mb-3 flex items-center gap-2">
-          <Eye className="h-4 w-4 text-primary" />
-          <p className="text-sm font-medium text-foreground">{t('personalize.preview')}</p>
-          <span className="text-xs text-muted-foreground">({previewLabel})</span>
-          {loadingPreview && (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Eye className="h-4 w-4 text-primary" />
+            <p className="text-sm font-medium text-foreground">{t('personalize.preview')}</p>
+            <span className="text-xs text-muted-foreground">({previewLabel})</span>
+            {loadingPreview && (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+            )}
+          </div>
+          {audience?.type === 'csv' && audience.csvContacts && audience.csvContacts.length > 1 && (
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 w-7 p-0 border-border text-foreground hover:bg-muted"
+                disabled={previewIndex <= 0}
+                onClick={() => setPreviewIndex((i) => Math.max(0, i - 1))}
+                aria-label="Previous recipient"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-xs font-mono text-muted-foreground">
+                {previewIndex + 1} / {audience.csvContacts.length}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 w-7 p-0 border-border text-foreground hover:bg-muted"
+                disabled={previewIndex >= audience.csvContacts.length - 1}
+                onClick={() =>
+                  setPreviewIndex((i) => Math.min(audience.csvContacts!.length - 1, i + 1))
+                }
+                aria-label="Next recipient"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           )}
         </div>
         <div className="rounded-lg bg-[#0e1a12] p-3">

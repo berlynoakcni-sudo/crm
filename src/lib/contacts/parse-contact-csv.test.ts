@@ -31,6 +31,8 @@ describe('parseContactCsv', () => {
 +15559876543,Bob,Customer`;
 
     expect(parseContactCsv(csv)).toEqual({
+      headers: ['phone', 'name', 'tags'],
+      customColumns: [],
       hasPhoneColumn: true,
       hasTagsColumn: true,
       hasCompanyColumn: false,
@@ -41,6 +43,7 @@ describe('parseContactCsv', () => {
           email: undefined,
           company: undefined,
           tagNames: ['VIP', 'Lead'],
+          custom_fields: undefined,
         },
         {
           phone: '+15559876543',
@@ -48,8 +51,42 @@ describe('parseContactCsv', () => {
           email: undefined,
           company: undefined,
           tagNames: ['Customer'],
+          custom_fields: undefined,
         },
       ],
+    });
+  });
+
+  it('parses dynamic additional columns into custom_fields', () => {
+    const csv = `phone,name,order_no,amount,city,product,delivery_date,discount
++919876543210,Rahul,ORD-101,1500,Bengaluru,King Bed,2026-11-20,10%
++919876543211,Pooja,ORD-102,3200,Mumbai,Dining Set,2026-11-25,15%`;
+
+    const result = parseContactCsv(csv);
+    expect(result.customColumns).toEqual([
+      'order_no',
+      'amount',
+      'city',
+      'product',
+      'delivery_date',
+      'discount',
+    ]);
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0].custom_fields).toEqual({
+      order_no: 'ORD-101',
+      amount: '1500',
+      city: 'Bengaluru',
+      product: 'King Bed',
+      delivery_date: '2026-11-20',
+      discount: '10%',
+    });
+    expect(result.rows[1].custom_fields).toEqual({
+      order_no: 'ORD-102',
+      amount: '3200',
+      city: 'Mumbai',
+      product: 'Dining Set',
+      delivery_date: '2026-11-25',
+      discount: '15%',
     });
   });
 
@@ -66,6 +103,7 @@ describe('parseContactCsv', () => {
       email: undefined,
       company: undefined,
       tagNames: [],
+      custom_fields: undefined,
     });
   });
 
@@ -74,6 +112,8 @@ describe('parseContactCsv', () => {
 +15551234567,Alice`;
 
     expect(parseContactCsv(csv)).toEqual({
+      headers: ['phone', 'name'],
+      customColumns: [],
       hasPhoneColumn: true,
       hasTagsColumn: false,
       hasCompanyColumn: false,
@@ -84,6 +124,7 @@ describe('parseContactCsv', () => {
           email: undefined,
           company: undefined,
           tagNames: [],
+          custom_fields: undefined,
         },
       ],
     });

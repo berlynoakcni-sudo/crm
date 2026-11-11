@@ -83,7 +83,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
           <p className="mt-1 text-xs text-muted-foreground">{t('chooseTemplate.createFirst')}</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
           {templates.map((template) => {
             const isSelected = selectedTemplate?.id === template.id;
             const catColor = categoryColors[template.category] ?? categoryColors.Utility;
@@ -92,26 +92,32 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
               <button
                 key={template.id}
                 onClick={() => onSelect(template)}
-                className={`flex flex-col gap-3 rounded-xl border p-4 text-left transition-all ${
+                className={`flex flex-col justify-between gap-3 rounded-xl border p-4 text-left transition-all min-w-0 w-full overflow-hidden h-full ${
                   isSelected
-                    ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
-                    : 'border-border bg-card/50 hover:border-border hover:bg-card'
+                    ? 'border-primary bg-primary/5 ring-1 ring-primary/30 shadow-xs'
+                    : 'border-border bg-card/50 hover:border-border hover:bg-card shadow-xs'
                 }`}
               >
-                <div className="flex items-start justify-between">
-                  <h3 className="text-sm font-medium text-foreground">{template.name}</h3>
-                  <span
-                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${catColor}`}
-                  >
-                    {template.category}
-                  </span>
+                <div className="space-y-2 w-full min-w-0">
+                  <div className="flex items-start justify-between gap-2 w-full min-w-0">
+                    <h3
+                      className="text-sm font-semibold text-foreground line-clamp-2 break-all min-w-0 flex-1 leading-snug"
+                      title={template.name}
+                    >
+                      {template.name}
+                    </h3>
+                    <span
+                      className={`shrink-0 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium leading-tight ${catColor}`}
+                    >
+                      {template.category}
+                    </span>
+                  </div>
+                  <p className="line-clamp-3 text-xs text-muted-foreground break-words leading-relaxed">
+                    {template.body_text}
+                  </p>
                 </div>
-                <p className="line-clamp-3 text-xs text-muted-foreground">{template.body_text}</p>
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                  <span>{template.language ?? 'en_US'}</span>
-                  {/* Status is omitted on purpose — every template
-                      shown here is already filtered to APPROVED,
-                      so the chip carried no information. */}
+                <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground pt-2 border-t border-border/40 w-full mt-auto">
+                  <span className="font-mono uppercase">{template.language ?? 'en_US'}</span>
                 </div>
               </button>
             );

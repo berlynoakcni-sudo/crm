@@ -37,7 +37,7 @@ export default function NewBroadcastPage() {
       operator: 'is' | 'is_not' | 'contains';
       value: string;
     };
-    csvContacts?: { phone: string; name?: string }[];
+    csvContacts?: { phone: string; name?: string; custom_fields?: Record<string, string> }[];
     excludeTagIds?: string[];
   }>({ type: 'all' });
   const [variables, setVariables] = useState<
@@ -132,7 +132,7 @@ export default function NewBroadcastPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
+    <div className="mx-auto max-w-4xl space-y-8">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-foreground">{t('title')}</h1>
@@ -209,6 +209,7 @@ export default function NewBroadcastPage() {
           {currentStep === 2 && template && (
             <Step3Personalize
               template={template}
+              audience={audience}
               variables={variables}
               onUpdate={setVariables}
               headerMediaUrl={headerMediaUrl}

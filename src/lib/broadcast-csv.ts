@@ -2,10 +2,10 @@
  * CSV → broadcast audience.
  *
  * The broadcast wizard's "Upload CSV" audience type needs a
- * `{ phone, name }[]` list, which is a narrower shape than the
- * contacts importer's. Rather than re-parse, this reuses the shared
+ * `{ phone, name, custom_fields }[]` list. Reuses the shared
  * `parseContactCsv` + `dedupeByPhone` so a CSV that imports cleanly on
- * the Contacts page also broadcasts cleanly (issue #512).
+ * the Contacts page also broadcasts cleanly and preserves dynamic columns
+ * (e.g. order_no, amount, city, product) for template variable mapping.
  *
  * De-duplication happens HERE, on the normalized number, because the
  * downstream contact upsert inserts against a UNIQUE index on
@@ -26,6 +26,7 @@ import { parseContactCsv } from '@/lib/contacts/parse-contact-csv';
 export interface BroadcastCsvContact {
   phone: string;
   name?: string;
+  custom_fields?: Record<string, string>;
 }
 
 export type BroadcastCsvError =
@@ -38,6 +39,8 @@ export type ParseBroadcastCsvResult =
   | {
       ok: true;
       contacts: BroadcastCsvContact[];
+      headers: string[];
+      customColumns: string[];
       /** Rows dropped as same-number repeats. */
       duplicates: number;
       /**
@@ -50,7 +53,7 @@ export type ParseBroadcastCsvResult =
   | { ok: false; error: BroadcastCsvError };
 
 export function parseBroadcastCsv(text: string): ParseBroadcastCsvResult {
-  const { rows, hasPhoneColumn } = parseContactCsv(text);
+  const { rows, headers, customColumns, hasPhoneColumn } = parseContactCsv(text);
 
   if (!hasPhoneColumn) return { ok: false, error: 'missing_phone_column' };
 
@@ -59,11 +62,15 @@ export function parseBroadcastCsv(text: string): ParseBroadcastCsvResult {
 
   return {
     ok: true,
-    // Drop email/company/tags: the broadcast audience only addresses
-    // people, and `name` is the sole field template variables can map.
-    contacts: unique.map(({ phone, name }) =>
-      name ? { phone, name } : { phone }
-    ),
+    contacts: unique.map(({ phone, name, custom_fields }) => ({
+      phone,
+      ...(name ? { name } : {}),
+      ...(custom_fields && Object.keys(custom_fields).length > 0
+        ? { custom_fields }
+        : {}),
+    })),
+    headers,
+    customColumns,
     duplicates,
     invalid,
   };

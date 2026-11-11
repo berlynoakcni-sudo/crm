@@ -119,7 +119,7 @@ type CustomValueIndex = Map<string, Map<string, string>>;
  */
 export function resolveVariables(
   variables: Record<string, VariableMapping>,
-  contact: Contact,
+  contact: Contact & { custom_fields?: Record<string, string> },
   customValues?: Map<string, string>,
 ): string[] {
   // Keys are typically "1","2",... — numeric-aware sort keeps
@@ -142,11 +142,11 @@ export function resolveVariables(
         email: contact.email,
         company: contact.company,
       };
-      return fieldMap[v.value] ?? '';
+      return fieldMap[v.value] ?? contact.custom_fields?.[v.value] ?? '';
     }
 
     // custom_field
-    return customValues?.get(v.value) ?? '';
+    return customValues?.get(v.value) ?? contact.custom_fields?.[v.value] ?? '';
   });
 }
 
@@ -208,8 +208,8 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
    */
   async function upsertCsvContacts(
     supabase: ReturnType<typeof createClient>,
-    csvRows: { phone: string; name?: string }[],
-  ): Promise<Contact[]> {
+    csvRows: { phone: string; name?: string; custom_fields?: Record<string, string> }[],
+  ): Promise<(Contact & { custom_fields?: Record<string, string> })[]> {
     if (csvRows.length === 0) return [];
 
     const {
@@ -228,7 +228,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
     // (migration 022). Keyed on the raw string instead, "+1 555-0100"
     // and "15550100" survived as two rows and the insert below died on
     // a 23505, failing the whole broadcast.
-    const uniqueByKey = new Map<string, { phone: string; name?: string }>();
+    const uniqueByKey = new Map<string, { phone: string; name?: string; custom_fields?: Record<string, string> }>();
     for (const row of csvRows) {
       const key = normalizeKey(row.phone);
       if (key && !uniqueByKey.has(key)) uniqueByKey.set(key, row);
@@ -291,10 +291,22 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       }
     }
 
-    // Preserve input order so analytics roughly matches the CSV order.
+    // Preserve input order so analytics roughly matches the CSV order,
+    // and attach custom_fields from the CSV rows so variable resolution can read them.
     return keys
-      .map((k) => byKey.get(k))
-      .filter((c): c is Contact => Boolean(c));
+      .map((k) => {
+        const contact = byKey.get(k);
+        const csvRow = uniqueByKey.get(k);
+        if (!contact) return null;
+        if (csvRow?.custom_fields) {
+          return {
+            ...contact,
+            custom_fields: csvRow.custom_fields,
+          };
+        }
+        return contact;
+      })
+      .filter((c): c is Contact & { custom_fields?: Record<string, string> } => Boolean(c));
   }
 
   async function createAndSendBroadcast(payload: BroadcastPayload): Promise<BroadcastSendOutcome> {
